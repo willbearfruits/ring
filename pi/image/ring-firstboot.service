@@ -1,0 +1,11 @@
+[Unit]
+Description=RING first boot: groups and the card folder
+Before=ring.service
+ConditionPathExists=!/var/lib/ring/.firstboot-done
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ring/firstboot.sh
+
+[Install]
+WantedBy=multi-user.target

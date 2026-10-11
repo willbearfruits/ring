@@ -1,0 +1,4 @@
+# RING on the Pi: environment for the service. AUDIODEV overrides the audio device start.sh would pick,
+# e.g. AUDIODEV=plughw:CARD=TWOFOLD or plughw:1. RING_BUFFER is frames per block (128 = 2.7 ms).
+#AUDIODEV=
+RING_BUFFER=128

@@ -1,0 +1,16 @@
+[Unit]
+Description=RING follow device
+After=sound.target systemd-udev-settle.service ring-firstboot.service
+Wants=ring-firstboot.service
+
+[Service]
+User=ring
+EnvironmentFile=-/etc/default/ring
+ExecStart=/opt/ring/start.sh
+Restart=always
+RestartSec=2
+LimitRTPRIO=95
+LimitMEMLOCK=infinity
+
+[Install]
+WantedBy=multi-user.target

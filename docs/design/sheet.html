@@ -1,0 +1,245 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ring Screen Sheet</title>
+<style>
+/* Layout: an anatomy panel, then every screen as an 800x480 panel in a two-column sheet with a caption. Dark-first, single look. */
+:root { --bg:#0b0c0e; --panel:#111316; --bezel:#1c1f24; --fg:#e8e4da; --dim:#6d7078; --amber:#ffb340; --cyan:#58d6ff; color-scheme: dark; }
+body { margin:0; background:var(--bg); color:var(--fg); font-family:'Rajdhani','Segoe UI',system-ui,sans-serif; padding-inline:16px; padding-block:24px; }
+.wrap { max-width:1180px; margin:0 auto; display:flex; flex-direction:column; gap:28px; }
+h1 { font-size:14px; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin:0; font-weight:600; }
+h1 em { color:var(--amber); font-style:normal; }
+.intro { color:var(--dim); font-size:15px; line-height:1.5; max-width:70ch; margin:0; }
+.grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(360px,1fr)); gap:34px 26px; }
+.screen { display:flex; flex-direction:column; gap:10px; min-width:0; }
+.screen.wide { grid-column:1 / -1; }
+canvas { width:100%; aspect-ratio:800/480; display:block; border-radius:14px; background:var(--panel); box-shadow:0 0 0 5px var(--bezel), 0 18px 50px rgba(0,0,0,.55); }
+.cap { display:flex; flex-direction:column; gap:4px; }
+.cap b { font-size:13px; letter-spacing:.12em; text-transform:uppercase; color:var(--amber); font-weight:700; }
+.cap b small { color:var(--dim); font-weight:500; letter-spacing:.06em; margin-left:8px; }
+.cap p { margin:0; color:var(--dim); font-size:14px; line-height:1.45; }
+.cap p span { color:var(--fg); }
+.nav { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:10px 24px; font-size:14px; color:var(--dim); line-height:1.5; }
+.nav b { color:var(--fg); font-weight:600; }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=DM+Mono:wght@400;500&display=swap">
+<div class="wrap">
+  <h1><em>RING</em> &nbsp;·&nbsp; every screen of the follow device &nbsp;·&nbsp; 7" panel, 800 × 480, touch only</h1>
+  <p class="intro">One language for all of it: the hub is the clock and the key, a ring of twelve around it is whatever you play or pick, the outer ring is time, and the two discs are the chain, input on the left and output on the right. Pages live on the bottom edge, utilities in the top corners. Nothing is a list unless it has to be.</p>
+  <div class="nav">
+    <p><b>Bottom edge, left to right:</b> PADS · CHORDS · PHRASE · DRUMS · TAPE · FX · AMP · MIX. Tap to switch, hold a page button to open PERFORM over it.</p>
+    <p><b>Top corners:</b> KEY (left) and FOLLOW (right) are one tap from anywhere, SONG and FILE sit behind them, SETUP behind FILE. Swipe down from the top edge for STAGE lock.</p>
+    <p><b>Hands:</b> every control is at least 44 px, rings are turned with one finger, two fingers on a ring change its range, a hold is always a record or a confirm, never a hidden menu.</p>
+  </div>
+  <div class="grid" id="grid"></div>
+</div>
+<script>
+(() => {
+const W=800,H=480,CX=400,CY=240,TAU=Math.PI*2;
+const C={fg:'#e8e4da',dim:'#6d7078',dim2:'#3f434b',amber:'#ffb340',amber2:'#ff7a1a',cyan:'#58d6ff',red:'#ff5a4a',green:'#7ee787',panel:'#111316',ring:'#1e2126',ring2:'#272b31',hub:'#141619',cell:'#181b20',cellb:'#1f2328',on:'#214650'};
+const NOTE=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+const PAGES=['PADS','CHORDS','PHRASE','DRUMS','TAPE','FX','AMP','MIX'];
+let ctx;
+function text(s,x,y,size,color,font,align){ctx.font=`${size}px ${font||"'Rajdhani', sans-serif"}`;ctx.fillStyle=color;ctx.textAlign=align||'center';ctx.textBaseline='middle';ctx.fillText(s,x,y);}
+function arc(x,y,r0,r1,a0,a1,fill,stroke){ctx.beginPath();ctx.arc(x,y,r1,a0-Math.PI/2,a1-Math.PI/2);ctx.arc(x,y,r0,a1-Math.PI/2,a0-Math.PI/2,true);ctx.closePath();if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=1;ctx.stroke();}}
+function circ(x,y,r,fill,stroke,lw){ctx.beginPath();ctx.arc(x,y,r,0,TAU);if(fill){ctx.fillStyle=fill;ctx.fill();}if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=lw||1;ctx.stroke();}}
+function pill(x,y,w,label,on,color){ctx.beginPath();ctx.roundRect(x-w/2,y-11,w,22,11);ctx.fillStyle=on?(color||C.cyan):'#1a1d22';ctx.fill();text(label,x,y,12,on?'#101214':C.dim);}
+function P(a,r,cx,cy){return [ (cx??CX)+Math.sin(a)*r, (cy??CY)-Math.cos(a)*r ];}
+function base(){ctx.fillStyle=C.panel;ctx.fillRect(0,0,W,H);for(const r of [250,270]) circ(CX,CY,r,null,'#15181c');}
+function tabs(active){PAGES.forEach((n,i)=>{const x=118+i*81,y=448;const on=n===active;circ(x,y,22,on?C.amber:'#1a1d22');text(n,x,y,12,on?'#1a1206':C.dim);});}
+function corners(l,r,ll,rr){text(l,60,34,12,C.dim);text(r,740,34,12,C.dim);if(ll)text(ll,60,52,10,C.dim2);if(rr)text(rr,740,52,10,C.dim2);circ(60,34,26,null,'#2a2d33');circ(740,34,26,null,'#2a2d33');}
+function outerSteps(n,lit,play,colorOn){const gap=0.012;for(let i=0;i<n;i++){const a0=i/n*TAU+gap,a1=(i+1)/n*TAU-gap;let f=lit.includes(i)?(colorOn||C.on):(i%4===0?C.cellb:C.cell);arc(CX,CY,198,224,a0,a1,f);}if(play!=null){const ph=play*TAU;arc(CX,CY,194,228,ph-0.035,ph+0.035,C.amber);}}
+function padRing(labels,sub,hot,root,colorHot){for(let i=0;i<12;i++){const a0=i/12*TAU+0.02,a1=(i+1)/12*TAU-0.02;let f=hot.includes(i)?(colorHot||'#7a5a2a'):(root===i?'#2a2620':C.ring);arc(CX,CY,112,190,a0,a1,f,'#0b0c0e');const am=(a0+a1)/2,[lx,ly]=P(am,151);text(labels[i],lx,ly-(sub?7:0),labels[i].length>4?13:18,root===i?C.amber:C.fg);if(sub)text(sub[i],lx,ly+12,10,C.dim,"'DM Mono', monospace");}}
+function hub(big,top,bot,ringColor,bigColor){circ(CX,CY,98,C.hub);circ(CX,CY,95,null,ringColor||'#2a2d33',3);const [mx,my]=P(0,86);circ(mx,my,4,C.amber);text(top,CX,CY-48,14,C.dim);text(big,CX,CY-6,String(big).length>5?30:54,bigColor||C.fg,"'DM Mono', monospace");text(bot,CX,CY+34,13,C.cyan);}
+function sat(x,y,label,line1,big,line2,arcs){circ(x,y,72,C.hub,'#2a2d33',2);text(label,x,y-82,12,C.dim);if(arcs)arcs.forEach((v,j)=>{const r1=66-j*12,r0=r1-8;arc(x,y,r0,r1,0,TAU,'#1d2126');if(v>0)arc(x,y,r0,r1,0,v*TAU*0.999,j===0?C.amber:'#7a5a2a');});text(line1,x,y-16,11,C.dim);text(big,x,y+4,22,C.fg,"'DM Mono', monospace");text(line2,x,y+26,13,C.dim);}
+function dial(x,y,r,v,label,val,color){arc(x,y,r-8,r,0.6*TAU*0,TAU*0.999,'#1d2126');arc(x,y,r-8,r,0,v*TAU*0.999,color||C.amber);text(label,x,y-6,11,C.dim);text(val,x,y+9,14,C.fg,"'DM Mono', monospace");}
+function wavering(seed,r0,r1,n,color){let s=seed;for(let i=0;i<n;i++){s=(s*1103515245+12345)&0x7fffffff;const v=(s/0x7fffffff);const env=(i%32<3)?1:0.25+0.3*Math.sin(i*0.4);const h=(r1-r0)*v*env;const a0=i/n*TAU,a1=(i+1)/n*TAU;arc(CX,CY,(r0+r1)/2-h/2,(r0+r1)/2+h/2,a0,a1,color);}}
+
+const screens=[];
+function screen(name,tag,desc,fn,wide){screens.push({name,tag,desc,fn,wide});}
+
+screen('ANATOMY','the language','Callouts on the PADS page. <span>Hub</span>: tempo, key, beat lamp, turn to transpose, hold to record. <span>Pad ring</span>: twelve things to play or pick. <span>Outer ring</span>: time, sixteen steps and the sweep. <span>Discs</span>: input left, output right, each a stack of arcs you turn. <span>Corners</span>: KEY and FOLLOW. <span>Bottom</span>: the pages.',()=>{
+  base();outerSteps(16,[0,4,8,12,6,14],0.47);padRing(['A','C','D','E','G','A','C','D','E','G','A','C'],['1','2','3','4','5','1','2','3','4','5','1','2'],[3],0);hub('128','A MINOR PENT','FOLLOWING');
+  sat(96,240,'IN','DRUM MACHINE','128','LOCK',[0.7]);sat(704,240,'FX','','DLY','35%',[0.35,0.25,0.1]);tabs('PADS');corners('KEY','FOLLOW');
+  ctx.strokeStyle=C.cyan;ctx.lineWidth=1;ctx.setLineDash([4,4]);
+  const call=(x,y,tx,ty,label)=>{ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(tx,ty);ctx.stroke();text(label,tx,ty+(ty<y?-10:10),12,C.cyan,"'DM Mono', monospace",tx<CX?'right':'left');};
+  call(CX,CY-60,300,100,'HUB · clock, key, record');call(CX+150,CY-60,560,92,'PAD RING · twelve to play');call(CX+200,CY+90,610,392,'OUTER RING · time');call(96,170,160,118,'INPUT DISC');call(704,170,640,118,'OUTPUT DISC');call(118,448,230,418,'PAGES');ctx.setLineDash([]);
+},true);
+
+screen('BOOT','power on','Three seconds from power to the last project. The ring draws itself once while the card is read; the corners report what is plugged in. No menu, no OS, no cursor.',()=>{
+  base();arc(CX,CY,198,224,0,0.72*TAU,C.amber2);arc(CX,CY,198,224,0.72*TAU,TAU,C.cell);circ(CX,CY,98,C.hub,'#2a2d33',3);text('RING',CX,CY-10,44,C.fg);text('follow device · 1.0',CX,CY+26,13,C.dim);text('LOADING  STAGE SET 03',CX,318,14,C.cyan,"'DM Mono', monospace");
+  text('IN   I2S codec  48 kHz',60,420,11,C.dim,"'DM Mono', monospace",'left');text('OUT  I2S codec  2.7 ms',60,438,11,C.dim,"'DM Mono', monospace",'left');text('USB  Twofold · MIDI',740,420,11,C.dim,"'DM Mono', monospace",'right');text('LINK ethernet',740,438,11,C.dim,"'DM Mono', monospace",'right');
+});
+
+screen('PADS','play notes','Twelve scale pads around the hub, root at twelve o\'clock. Tap for a note, drag across for a strum, two fingers for an interval. <span>Hold a chord on CHORDS and the pads follow it.</span> Turn the hub to transpose; the octave arc under the hub shifts the whole ring.',()=>{
+  base();outerSteps(16,[0,4,8,12,6,14],0.47);padRing(['A','C','D','E','G','A','C','D','E','G','A','C'],['1','2','3','4','5','1','2','3','4','5','1','2'],[3,8],0,C.amber2);hub('128','A MINOR PENT','FOLLOWING');
+  sat(96,240,'IN','DRUM MACHINE','128','LOCK',[0.7]);sat(704,240,'FX','','DLY','35%',[0.35,0.25,0.1]);tabs('PADS');corners('KEY','FOLLOW');
+  pill(96,340,72,'FOLLOW',true);pill(96,372,72,'IN FX',false);pill(704,340,72,'DLY',true,C.amber);pill(704,372,72,'VRB',false);pill(704,404,72,'DRV',false);
+  arc(CX,CY,100,108,0.42*TAU,0.58*TAU,'#2a2d33');text('OCT 3',CX,CY+70,11,C.dim);
+});
+
+screen('CHORDS','omnichord','After BARE!\'s PLAY page, bent into a circle: the pad ring is the chord buttons of the key, the outer ring is a thirteen-string strum plate you run a finger along. The hub shows the chord held; HOLD keeps it after you lift.',()=>{
+  base();for(let i=0;i<13;i++){const a0=i/13*TAU+0.01,a1=(i+1)/13*TAU-0.01;arc(CX,CY,198,224,a0,a1,i<5?'#3a5a3a':C.cell);}
+  padRing(['Am','Bø','C','Dm','Em','F','G','A','Bb','Dm7','E7','Gm'],['i','ii°','III','iv','v','VI','VII','bor','bor','7th','7th','bor'],[0],0,'#3a5a3a');hub('Am7','KEY A MINOR','HOLD ON','#7ee787');
+  sat(96,240,'VOICE','','HARP','organ · pad · harp',[0.5]);sat(704,240,'RHYTHM','AUTO','BOSSA','follows the beat',[0.6,0.3]);tabs('CHORDS');corners('KEY','FOLLOW');
+  text('strum plate · run a finger along the outer ring',CX,112,11,C.dim2);
+});
+
+screen('PHRASE','melody loop','Four phrases, A to D, as nested arcs inside the outer ring; the lit one is playing and the one you edit sits outermost. Tap a step to toggle, hold a step and turn the hub to change its note, two fingers on the ring to set its length (3, 5, 7, 12, 16 steps for odd meters).',()=>{
+  base();outerSteps(16,[0,3,6,9,12,14],0.31,'#2b5f6e');
+  [[0,'A',0.9],[1,'B',0.5],[2,'C',0.3],[3,'D',0]].forEach(([j,n,fill])=>{const r1=190-j*18,r0=r1-12;arc(CX,CY,r0,r1,0,TAU,C.ring);if(fill)arc(CX,CY,r0,r1,0,fill*TAU*0.999,j===0?'#2b5f6e':'#1f3a42');const [lx,ly]=P(-0.06,(r0+r1)/2);text(n,lx,ly,11,j===0?C.cyan:C.dim,"'DM Mono', monospace");});
+  hub('16','PHRASE A · 1/16','QUANTIZE 50%');sat(96,240,'LENGTH','steps','16','4/4',[1]);sat(704,240,'FEEL','SWING','58','humanize 20',[0.58,0.2]);tabs('PHRASE');corners('KEY','FOLLOW');
+  pill(96,340,72,'REC',false,C.red);pill(96,372,72,'CLEAR',false);pill(704,340,72,'COPY',false);pill(704,372,72,'ARP',true);
+});
+
+screen('DRUMS','kit ring','Where the PS1 drum machine lives on. Twelve drums around the hub, the outer ring is the selected drum\'s sixteen steps; the slot roles stay fixed so patterns survive a kit change. Tap a drum to hear it, tap a step to toggle, hold a step for accent, probability and rolls.',()=>{
+  base();outerSteps(16,[0,4,8,11,12],0.47,'#5a2a2a');padRing(['KCK','KK2','SNR','SN2','PRC','TM1','TM2','TM3','CHH','OHH','CY1','CY2'],null,[0],-1,'#6e2b2b');hub('P03','KIT · METAL','DBEAT 195');
+  sat(96,240,'PATTERN','','03','of 16',[0.2]);sat(704,240,'DRUM','KCK','KICK CLICK','pitch · decay · dirt',[0.5,0.9,0.1]);tabs('DRUMS');corners('KEY','FOLLOW');
+  pill(96,340,72,'FILL',false);pill(96,372,72,'MUTE',false);pill(704,340,72,'DIRT',true,C.amber);pill(704,372,72,'CHOKE',false);
+});
+
+screen('TAPE','looper','Four tape layers as concentric loops; each ring shows where it has sound. Hold REC to lay a layer on the followed bar length, overdub by holding again, turn a layer\'s ring to shift it, pinch to halve or double its speed. Reverse flips the arrow.',()=>{
+  base();[[0,[[0,1]]],[1,[[0,0.5],[0.7,1]]],[2,[[0.25,0.6]]],[3,[]]].forEach(([j,segs])=>{const r1=224-j*30,r0=r1-22;arc(CX,CY,r0,r1,0,TAU,C.ring);segs.forEach(([a,b])=>arc(CX,CY,r0,r1,a*TAU,b*TAU,j===0?'#7a4a2a':'#4a3222'));const [lx,ly]=P(0.02,(r0+r1)/2);text(String(j+1),lx,ly,11,C.dim,"'DM Mono', monospace");});
+  const ph=0.33*TAU;arc(CX,CY,100,228,ph-0.01,ph+0.01,C.amber);hub('2 BARS','LAYER 1','PLAYING','#ff7a1a');
+  sat(96,240,'TRANSPORT','','REC','hold to record',[0]);sat(704,240,'SPEED','','1×','reverse off',[0.5,0.3]);tabs('TAPE');corners('KEY','FOLLOW');
+  pill(96,340,72,'OVERDUB',false,C.red);pill(96,372,72,'UNDO',false);pill(704,340,72,'HALF',false);pill(704,372,72,'REV',false);
+});
+
+screen('FX','effects wheel','Twelve effects around the hub, each with its own amount arc. Tap one to select, turn the ring inside it to set it, hold it for momentary. The hub picks which chain you are editing: the input, the instrument, or both. Delays and gates are synced to the followed tempo.',()=>{
+  base();const fx=['DLY','VRB','DRV','CRSH','FILT','GATE','RPT','STUT','REV','FRZ','STOP','KILL'],v=[0.35,0.25,0,0,0.5,0,0,0,0,0,0,0];
+  for(let i=0;i<12;i++){const a0=i/12*TAU+0.02,a1=(i+1)/12*TAU-0.02;arc(CX,CY,112,190,a0,a1,i===0?'#2a2620':C.ring,'#0b0c0e');arc(CX,CY,196,226,a0,a1,C.cell);if(v[i]>0)arc(CX,CY,196,226,a0,a0+(a1-a0)*v[i],i===0?C.amber:'#7a5a2a');const [lx,ly]=P((a0+a1)/2,151);text(fx[i],lx,ly-6,15,i===0?C.amber:C.fg);text(v[i]?Math.round(v[i]*100)+'%':'off',lx,ly+12,10,C.dim,"'DM Mono', monospace");}
+  hub('INST','CHAIN','DLY 3/16 · 42% FB');sat(96,240,'INPUT CHAIN','','DRY','fx bypass',[0]);sat(704,240,'RETURN','','-6','dB to mix',[0.65]);tabs('FX');corners('KEY','FOLLOW');
+  pill(96,340,72,'IN',false);pill(96,372,72,'BOTH',false);pill(704,340,72,'TAP',false);pill(704,372,72,'SYNC',true,C.amber);
+});
+
+screen('AMP','amp models','The input as a guitar or a dirty synth. Twelve model slots around the hub, LSTM captures that run at low latency on the Pi; gain, tone, level and presence on the outer ring as four quadrant dials. The left disc is a tuner, the needle on its rim.',()=>{
+  base();padRing(['CLEAN','CRUNCH','FUZZ','BASS','PLEXI','AC30','5150','TWEED','DRONE','BROKEN','NAM 1','NAM 2'],null,[2],-1,'#7a4a2a');
+  [['GAIN',0.7],['TONE',0.5],['LEVEL',0.6],['PRES',0.3]].forEach(([n,v],q)=>{const a0=q/4*TAU+0.03,a1=(q+1)/4*TAU-0.03;arc(CX,CY,198,224,a0,a1,C.cell);arc(CX,CY,198,224,a0,a0+(a1-a0)*v,C.amber);const [lx,ly]=P((a0+a1)/2,240);text(n,lx,ly,10,C.dim);});
+  hub('FUZZ','MODEL 03','3.1 ms','#ff7a1a');circ(96,240,72,C.hub,'#2a2d33',2);text('TUNER',96,158,12,C.dim);const na=-0.08*TAU;const [nx,ny]=P(na,60,96,240);ctx.strokeStyle=C.green;ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(96,240);ctx.lineTo(nx,ny);ctx.stroke();text('E',96,250,26,C.fg,"'DM Mono', monospace");text('-4 ct',96,272,11,C.dim);
+  sat(704,240,'CAB','','4×12','mic: close',[0.5]);tabs('AMP');corners('KEY','FOLLOW');pill(96,340,72,'MUTE',false);pill(704,340,72,'CAB',true,C.amber);pill(704,372,72,'GATE',false);
+});
+
+screen('MIX','levels','Every source is an arc around the hub, turned like a fader: input, pads, chords, phrase, drums, tape, and the two returns. The hub is the master meter. Tap an arc to solo, hold to mute. The output disc is the headphone and line split.',()=>{
+  base();const ch=[['IN',0.8],['PADS',0.7],['CHRD',0.5],['PHRS',0.6],['DRUM',0.75],['TAPE',0.4],['DLY',0.5],['VRB',0.3]];
+  ch.forEach(([n,v],j)=>{const r1=224-j*14,r0=r1-10;arc(CX,CY,r0,r1,0,TAU,C.ring);arc(CX,CY,r0,r1,0,v*TAU*0.78,j===4?C.amber:'#4a5a6a');const [lx,ly]=P(0.80*TAU,(r0+r1)/2);text(n,lx,ly,9,C.dim,"'DM Mono', monospace");});
+  circ(CX,CY,98,C.hub);arc(CX,CY,86,95,0,0.62*TAU,C.green);arc(CX,CY,86,95,0.62*TAU,0.7*TAU,C.amber);arc(CX,CY,86,95,0.7*TAU,TAU,'#2a2d33');text('MASTER',CX,CY-30,13,C.dim);text('-3.2',CX,CY+2,40,C.fg,"'DM Mono', monospace");text('dBFS peak',CX,CY+34,12,C.dim);
+  sat(96,240,'IN','line · gain','+6','dB',[0.6]);sat(704,240,'OUT','line / phones','-10','phones +0',[0.7,0.5]);tabs('MIX');corners('KEY','FOLLOW');pill(96,340,72,'SOLO',false);pill(704,340,72,'MONO',false);
+});
+
+screen('SOUND','the voice','The pad voice as four FM operators orbiting the hub, their lines the algorithm; tap one to edit it, the outer ring becomes its envelope as four arcs you pull. Drag an operator onto another to re-patch. Waves, drones and sampled voices sit behind the hub\'s type button.',()=>{
+  base();const ops=[[CX-70,CY-50],[CX+70,CY-50],[CX-70,CY+55],[CX+70,CY+55]];ctx.strokeStyle='#4a5a6a';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(...ops[0]);ctx.lineTo(...ops[2]);ctx.moveTo(...ops[1]);ctx.lineTo(...ops[3]);ctx.moveTo(...ops[2]);ctx.lineTo(CX,CY+120);ctx.moveTo(...ops[3]);ctx.lineTo(CX,CY+120);ctx.stroke();
+  ops.forEach(([x,y],i)=>{circ(x,y,30,i===0?'#3a2e1e':C.hub,i===0?C.amber:'#2a2d33',2);text('OP'+(i+1),x,y-6,12,i===0?C.amber:C.fg);text(['1.00','2.00','3.01','0.50'][i],x,y+10,10,C.dim,"'DM Mono', monospace");});
+  circ(CX,CY+120,14,C.amber);text('OUT',CX,CY+120,9,'#1a1206');
+  [['A',0.05],['D',0.4],['S',0.6],['R',0.35]].forEach(([n,v],q)=>{const a0=q/4*TAU+0.03,a1=(q+1)/4*TAU-0.03;arc(CX,CY,198,224,a0,a1,C.cell);arc(CX,CY,198,224,a0,a0+(a1-a0)*v,C.cyan);const [lx,ly]=P((a0+a1)/2,240);text(n,lx,ly,11,C.dim);});
+  text('OP1 ENVELOPE',CX,CY-110,11,C.dim2);sat(96,240,'TYPE','','FM','wave · drone · smp',[0.25]);sat(704,240,'LFO','1/8','VIB','to pitch 20%',[0.3,0.2]);tabs('PADS');corners('KEY','FOLLOW');pill(704,340,72,'SAVE',false);pill(96,340,72,'DICE',false);
+});
+
+screen('FOLLOW','listening','The page that makes it a follow device. The last two seconds of the input wrap the outer ring; detected onsets are ticks, the four beat lamps show the lock. The hub is the followed tempo and its confidence. Nudge the phase by turning the hub; tap it to force a downbeat.',()=>{
+  base();wavering(7,196,226,128,'#3a4a55');for(const a of [0,0.125,0.25,0.5,0.625,0.75])arc(CX,CY,192,230,a*TAU-0.006,a*TAU+0.006,C.cyan);
+  for(let i=0;i<4;i++){const [x,y]=P(i/4*TAU,150);circ(x,y,16,i===1?C.cyan:'#1d2126');text(String(i+1),x,y,13,i===1?'#101214':C.dim,"'DM Mono', monospace");}
+  text('onsets',CX,112,11,C.dim2);hub('128.4','CONFIDENCE 92%','LOCKED · 3 bars');
+  sat(96,240,'SOURCE','','AUDIO','midi · link · free',[0.9]);sat(704,240,'NUDGE','phase','+12','ms',[0.55]);tabs('PADS');corners('KEY','FOLLOW');pill(96,340,72,'AUDIO',true);pill(96,372,72,'LINK',false);pill(704,340,72,'RESET',false);pill(704,372,72,'TAP',false);
+});
+
+screen('KEY','scale and tuning','The circle of fifths on the pad ring, the chosen scale on the outer ring. Turn the hub to the root; the whole instrument follows: pads, chords, arpeggios, the phrase. The right disc holds tuning and temperament; the left can hear the key from the input.',()=>{
+  base();const fifths=['C','G','D','A','E','B','F#','C#','G#','D#','A#','F'];padRing(fifths,null,[3],3,'#2a2620');
+  const sc=['MINOR PENT','DORIAN','MAJOR','PHRYGIAN','WHOLE','HARM MIN','BLUES','HIRAJOSHI'];for(let i=0;i<8;i++){const a0=i/8*TAU+0.01,a1=(i+1)/8*TAU-0.01;arc(CX,CY,198,224,a0,a1,i===0?'#2b5f6e':C.cell);}
+  const [sx,sy]=P(1/16*TAU,240);text('MINOR PENT',sx,sy,10,C.cyan);hub('A','ROOT','MINOR PENT');sat(96,240,'HEAR KEY','from input','A','minor · 88%',[0.88]);sat(704,240,'TUNING','A =','440','equal',[0.5]);tabs('PADS');corners('KEY','FOLLOW');pill(96,340,72,'LISTEN',true);pill(704,340,72,'432',false);
+});
+
+screen('SONG','arrangement','Sections as arcs of a ring, their length their bar count; the playhead walks the ring. Each section recalls phrases, a drum pattern and a chord. Tap a section to jump at the next bar, hold to edit it, turn the hub to scrub.',()=>{
+  base();const secs=[['A',4],['A',4],['B',8],['A',4],['C',8],['B',8],['END',2]];let total=secs.reduce((s,x)=>s+x[1],0),acc=0;
+  secs.forEach(([n,b],i)=>{const a0=acc/total*TAU+0.01,a1=(acc+b)/total*TAU-0.01;arc(CX,CY,140,224,a0,a1,i===2?'#2b5f6e':(i%2?C.ring:C.ring2),'#0b0c0e');const [lx,ly]=P((a0+a1)/2,182);text(n,lx,ly-6,18,i===2?C.cyan:C.fg);text(b+' bars',lx,ly+12,10,C.dim,"'DM Mono', monospace");acc+=b;});
+  const ph=(10.5/total)*TAU;arc(CX,CY,136,228,ph-0.008,ph+0.008,C.amber);hub('B','BAR 11 OF 38','3:12 left');sat(96,240,'LOOP','section','B','loop on',[0.4]);sat(704,240,'TEMPO MAP','','128','follow overrides',[0.6]);tabs('PHRASE');corners('KEY','FOLLOW');pill(96,340,72,'LOOP',true);pill(704,340,72,'EDIT',false);
+});
+
+screen('PERFORM','momentary','Held over any page: twelve big effects, nothing smaller than a thumb. Hold one for as long as you want it, tap to latch, the hub kills everything. Repeat and stutter rates are on the outer ring and follow the beat.',()=>{
+  base();const fx=['RPT 1/4','RPT 1/8','RPT 1/16','STUT','STOP','REV','FRZ','FILT ↓','FILT ↑','KILL LO','KILL HI','SOLO IN'];
+  for(let i=0;i<12;i++){const a0=i/12*TAU+0.015,a1=(i+1)/12*TAU-0.015;arc(CX,CY,112,226,a0,a1,i===2?C.amber2:(i%2?C.ring:C.ring2),'#0b0c0e');const [lx,ly]=P((a0+a1)/2,169);text(fx[i],lx,ly,14,i===2?'#1a1206':C.fg);}
+  circ(CX,CY,98,'#3a1a1a','#ff5a4a',3);text('KILL',CX,CY-6,30,C.red);text('tap: all off',CX,CY+26,12,C.dim);sat(96,240,'RATE','repeat','1/16','sync',[0.25]);sat(704,240,'DEPTH','','100','%',[1]);tabs('FX');corners('KEY','FOLLOW');
+});
+
+screen('FILE','projects','Twelve project slots around the hub, named by you with a ring keyboard. The outer ring is the card, filled to its used part. Export the project as WAV stems and MIDI to the card; import samples and amp captures from it.',()=>{
+  base();padRing(['STAGE 03','BASEMENT','DOOM SET','SKETCH','PENTA JAM','FOLLOW TEST','7/8 THING','EMPTY','EMPTY','EMPTY','EMPTY','EMPTY'],null,[0],-1,'#2a2620');arc(CX,CY,198,224,0,TAU,C.cell);arc(CX,CY,198,224,0,0.18*TAU,C.cyan);text('card 32 GB · 18% used',CX,112,11,C.dim2);
+  hub('STAGE 03','PROJECT','saved 2 min ago');sat(96,240,'EXPORT','','WAV','stems + midi',[0]);sat(704,240,'IMPORT','','SMP','wav · nam',[0]);tabs('PADS');corners('KEY','FOLLOW');pill(96,340,72,'SAVE',true,C.amber);pill(96,372,72,'SAVE AS',false);pill(704,340,72,'LOAD',false);pill(704,372,72,'DELETE',false,C.red);
+});
+
+screen('SETUP','the machine','The only list on the device, and still a ring: input source, output, sample rate, buffer, MIDI, Link, screen, update. The hub shows the one number that matters on stage, input-to-output latency, measured by a loopback test.',()=>{
+  base();const items=[['IN','I2S codec'],['OUT','I2S codec'],['RATE','48 kHz'],['BUFFER','128'],['MIDI','USB · DIN'],['LINK','on'],['USB','Twofold'],['SCREEN','80%'],['TOUCH','calibrate'],['UPDATE','1.0'],['ABOUT',''],['REBOOT','']];
+  for(let i=0;i<12;i++){const a0=i/12*TAU+0.02,a1=(i+1)/12*TAU-0.02;arc(CX,CY,112,224,a0,a1,i===3?'#2a2620':(i%2?C.ring:C.ring2),'#0b0c0e');const [lx,ly]=P((a0+a1)/2,168);text(items[i][0],lx,ly-7,13,i===3?C.amber:C.fg);text(items[i][1],lx,ly+10,10,C.dim,"'DM Mono', monospace");}
+  hub('2.7','LATENCY in→out','ms · measured');sat(96,240,'BUFFER','frames','128','64 · 256',[0.5]);sat(704,240,'CPU','dsp core','31','% · 4 cores',[0.31,0.12,0.05]);tabs('PADS');corners('KEY','FOLLOW');pill(704,340,72,'TEST',false);
+});
+
+screen('STAGE','lock','Swipe down from the top and the device locks into what a gig needs: the beat, the tempo, four pads, kill. Nothing else can be touched by accident. Swipe up to come back.',()=>{
+  base();const ph=0.47*TAU;arc(CX,CY,180,230,0,TAU,C.cell);arc(CX,CY,180,230,ph-0.04,ph+0.04,C.amber);for(let i=0;i<4;i++){const a=i/4*TAU;arc(CX,CY,176,234,a-0.01,a+0.01,C.dim);}
+  for(let i=0;i<4;i++){const [x,y]=P(i/4*TAU+TAU/8,150);circ(x,y,40,i===1?C.amber2:C.ring2);text(['A','C','E','G'][i],x,y,22,i===1?'#1a1206':C.fg);}
+  circ(CX,CY,88,C.hub,C.amber,4);text('128',CX,CY-2,56,C.fg,"'DM Mono', monospace");text('LOCKED',CX,CY+36,13,C.cyan);text('swipe up to unlock',CX,440,12,C.dim2);circ(96,240,40,'#3a1a1a','#ff5a4a',2);text('KILL',96,240,14,C.red);
+});
+
+screen('HELP','gestures','One overlay, over any page, with the gestures that are the same everywhere. Tap, drag, turn, hold, pinch, two fingers. Shown the first time and on a long hold of the page button.',()=>{
+  base();outerSteps(16,[],null);padRing(['','','','','','','','','','','',''],null,[],-1);hub('','','');ctx.fillStyle='rgba(17,19,22,.55)';ctx.fillRect(0,0,W,H);
+  const g=[['TAP','play, pick, toggle',CX-200,120],['DRAG ALONG A RING','strum, scrub, set an amount',CX+200,120],['TURN THE HUB','transpose, nudge, scrub',CX,205],['HOLD','record, confirm, momentary',CX-200,290],['PINCH A RING','halve or double its range',CX+200,290],['TWO FINGERS','an interval, a loop range',CX,370]];
+  g.forEach(([a,b,x,y])=>{text(a,x,y-10,16,C.amber);text(b,x,y+12,13,C.fg);});
+});
+
+screen('SAMPLE','sample editor','A sample wrapped around the ring, start and end as two handles you drag along it, the loop as a third arc. Pinch to zoom the ring onto a region. Twelve slice markers on the pad ring, tap one to hear it; DICE slices by the onsets it hears.',()=>{
+  base();wavering(3,196,228,160,'#4a5a6a');arc(CX,CY,192,232,0.12*TAU-0.006,0.12*TAU+0.006,C.amber);arc(CX,CY,192,232,0.83*TAU-0.006,0.83*TAU+0.006,C.amber);arc(CX,CY,186,190,0.3*TAU,0.62*TAU,C.cyan);text('START',CX-150,112,10,C.amber,"'DM Mono', monospace");text('END',CX+150,112,10,C.amber,"'DM Mono', monospace");text('LOOP',CX,116,10,C.cyan,"'DM Mono', monospace");
+  padRing(['1','2','3','4','5','6','7','8','9','10','11','12'],null,[4],-1,'#2b5f6e');hub('BREAK_94','1.63 s · 48k','12 SLICES');sat(96,240,'PITCH','semitones','+0','fine 0',[0.5]);sat(704,240,'GAIN','','-1.0','dB · normalize',[0.7]);tabs('DRUMS');corners('KEY','FOLLOW');pill(96,340,72,'DICE',false);pill(96,372,72,'REVERSE',false);pill(704,340,72,'TRIM',false);pill(704,372,72,'CROP',false);
+});
+
+screen('MOD','modulation','A patch matrix without a grid: sources on the inner ring, destinations on the outer, a line between them is a modulation and its thickness the depth. Drag from a source to a destination to add one, tap the line to set depth or sign, hold to remove.',()=>{
+  base();const src=['LFO1','LFO2','ENV','BEAT','IN LVL','TOUCH X','TOUCH Y','PRESS','RND','MIDI','FOLLOW','MACRO'],dst=['PITCH','CUTOFF','DLY MIX','VRB','DRIVE','PAN','OP2 LVL','RATE','GATE','SPEED','LEVEL','FM AMT'];
+  for(let i=0;i<12;i++){const a0=i/12*TAU+0.02,a1=(i+1)/12*TAU-0.02;arc(CX,CY,112,150,a0,a1,C.ring,'#0b0c0e');arc(CX,CY,196,226,a0,a1,C.ring2,'#0b0c0e');let [x,y]=P((a0+a1)/2,131);text(src[i],x,y,9,C.fg,"'DM Mono', monospace");[x,y]=P((a0+a1)/2,211);text(dst[i],x,y,9,C.fg,"'DM Mono', monospace");}
+  const links=[[0,1,3],[3,8,2],[4,0,1],[5,2,2],[10,7,3]];links.forEach(([a,b,w])=>{const [x0,y0]=P((a+0.5)/12*TAU,150),[x1,y1]=P((b+0.5)/12*TAU,196);ctx.strokeStyle=C.cyan;ctx.lineWidth=w;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();});
+  hub('5','MODULATIONS','LFO1 → CUTOFF +60');sat(96,240,'LFO 1','1/4','TRI','sync',[0.25]);sat(704,240,'MACRO','one finger','M1','4 targets',[0.6]);tabs('PADS');corners('KEY','FOLLOW');
+});
+
+screen('MIDI','midi and learn','Sixteen channels on the outer ring, in and out. The pad ring lists what the device sends and receives: notes from the pads, clock, program change, the macros as CCs. LEARN: hold any control on any page, move a knob on the keyboard, done.',()=>{
+  base();for(let i=0;i<16;i++){const a0=i/16*TAU+0.012,a1=(i+1)/16*TAU-0.012;arc(CX,CY,198,224,a0,a1,i===0||i===9?'#2b5f6e':C.cell);const [x,y]=P((a0+a1)/2,240);text(String(i+1),x,y,9,C.dim,"'DM Mono', monospace");}
+  padRing(['NOTES','CLOCK','PC','CC M1','CC M2','CC FX','CC MIX','PADS IN','KEYS IN','CLOCK IN','PC IN','LEARN'],null,[11],-1,'#7a4a2a');hub('CH 1','IN · OUT','clock out on');sat(96,240,'INPUT','usb · din','KEYS','velocity curve',[0.5]);sat(704,240,'OUTPUT','','DIN','thru off',[0.5]);tabs('PADS');corners('KEY','FOLLOW');pill(704,340,72,'LEARN',true,C.amber);pill(96,340,72,'PANIC',false,C.red);
+});
+
+screen('SCENES','snapshots','Twelve snapshots of everything, the whole mixer, the effects, the key, the phrases. Hold a slot to capture, tap to recall at the next bar, drag between two to morph. The outer ring is the morph, the hub shows how far across you are.',()=>{
+  base();padRing(['INTRO','VERSE','DROP','BREAK','OUTRO','DUB','HALF','NOISE','CLEAN','EMPTY','EMPTY','EMPTY'],null,[2],-1,'#2a2620');arc(CX,CY,198,224,0,TAU,C.cell);arc(CX,CY,198,224,0,0.3*TAU,C.amber);text('morph VERSE → DROP',CX,112,11,C.dim2);
+  hub('30%','MORPH','DROP at next bar');sat(96,240,'RECALL','','BAR','now · beat · bar',[0.6]);sat(704,240,'INCLUDE','','ALL','mix · fx · key',[1]);tabs('PHRASE');corners('KEY','FOLLOW');pill(96,340,72,'CAPTURE',false,C.amber);pill(704,340,72,'LOCK KEY',false);
+});
+
+screen('RECORD','bounce','Record the output, or the input alone, to the card as a 48 kHz WAV, with a count-in on the ring and a metronome you can send to the phones only. The ring fills as the take runs; the hub is the elapsed time and the level.',()=>{
+  base();arc(CX,CY,198,224,0,TAU,C.cell);arc(CX,CY,198,224,0,0.36*TAU,C.red);for(let i=0;i<4;i++){const [x,y]=P(i/4*TAU,150);circ(x,y,16,i<2?C.amber:'#1d2126');text(String(i+1),x,y,13,i<2?'#101214':C.dim,"'DM Mono', monospace");}
+  text('count-in 1 bar',CX,112,11,C.dim2);circ(CX,CY,98,C.hub,C.red,3);text('REC',CX,CY-40,13,C.red);text('1:24',CX,CY-6,44,C.fg,"'DM Mono', monospace");text('-4.1 dB peak',CX,CY+34,12,C.dim);sat(96,240,'SOURCE','','OUT','input · pads only',[0.8]);sat(704,240,'CLICK','to phones','ON','-12 dB',[0.5]);tabs('MIX');corners('KEY','FOLLOW');pill(96,340,72,'STOP',true,C.red);pill(704,340,72,'TAKE 3',false);
+});
+
+screen('ROUTING','patchbay','Where sound goes. Inputs on the left disc, outputs on the right, the chain in between as arcs you can reorder by dragging: amp before effects or after, the follower listening to the input or to the mix, the phones carrying the click.',()=>{
+  base();const stages=['IN','AMP','FX','INST','MIX','OUT'];stages.forEach((n,i)=>{const x=150+i*100;circ(x,240,34,i===2?'#2a2620':C.hub,i===2?C.amber:'#2a2d33',2);text(n,x,240,14,i===2?C.amber:C.fg);if(i<5){ctx.strokeStyle='#4a5a6a';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(x+34,240);ctx.lineTo(x+66,240);ctx.stroke();}});
+  ctx.strokeStyle=C.cyan;ctx.lineWidth=2;ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(150,274);ctx.quadraticCurveTo(300,380,450,274);ctx.stroke();ctx.setLineDash([]);text('FOLLOWER listens here',300,350,11,C.cyan);
+  text('drag a stage to reorder · tap a line to mute it',CX,120,11,C.dim2);text('PHONES: mix + click',650,330,11,C.dim);text('LINE: mix',650,348,11,C.dim);tabs('MIX');corners('KEY','FOLLOW');
+});
+
+screen('NAME','ring keyboard','Text without a QWERTY: letters on two rings, turn to the letter, tap to type, the hub shows the word. Used for project, scene and sample names, nothing else; the device never asks you to type on stage.',()=>{
+  base();const A='ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 -_'.split('');for(let i=0;i<A.length;i++){const n=A.length,a0=i/n*TAU+0.004,a1=(i+1)/n*TAU-0.004;const sel=i===18;arc(CX,CY,196,228,a0,a1,sel?C.amber:C.cell);const [x,y]=P((a0+a1)/2,212);text(A[i],x,y,12,sel?'#1a1206':C.fg,"'DM Mono', monospace");}
+  for(let i=0;i<12;i++){const a0=i/12*TAU+0.02,a1=(i+1)/12*TAU-0.02;arc(CX,CY,112,180,a0,a1,C.ring,'#0b0c0e');const [x,y]=P((a0+a1)/2,146);text(['SPACE','DEL','OK','CANCEL','CAPS','123','.','/','←','→','CLR','RND'][i],x,y,11,i===2?C.green:C.fg);}
+  hub('STAGE_0','NAME','3 left');tabs('PADS');corners('KEY','FOLLOW');
+});
+
+screen('UNDO','history','Every change is a tick on the ring; turn the hub back through time and the device sounds like it did then. Tap to land there. Nothing is ever lost until you save over it.',()=>{
+  base();for(let i=0;i<48;i++){const a0=i/48*TAU+0.003,a1=(i+1)/48*TAU-0.003;arc(CX,CY,198,224,a0,a1,i<30?'#2b5f6e':(i<34?'#1f3a42':C.cell));}
+  const ph=30/48*TAU;arc(CX,CY,192,230,ph-0.008,ph+0.008,C.amber);const h=['kit → DOOM','phrase A step 7','fx dly 35%','key → A','scene DROP','tape layer 2','mix drum -2'];h.forEach((t,i)=>{const [x,y]=P((i-3)/12*TAU,150);text(t,x,y,10,i===3?C.amber:C.dim,"'DM Mono', monospace");});
+  hub('34','CHANGES','4 undone');sat(96,240,'BACK','','4','steps',[0.1]);sat(704,240,'SAVED','','2m','ago · autosave',[0.8]);tabs('PADS');corners('KEY','FOLLOW');pill(96,340,72,'REDO',false);pill(704,340,72,'SAVE',true,C.amber);
+});
+
+screen('NOTICES','the log','What the machine wants to tell you, never as a popup: a lamp in the corner, and this ring when you open it. Card nearly full, clock lost, codec clipping, update ready. Tap one to act, turn to read older.',()=>{
+  base();const n=[['12:04','clipping on IN, gain -3 dB applied',C.amber],['12:01','follow lost the beat for 2 bars',C.cyan],['11:48','project STAGE 03 saved',C.dim],['11:30','update 1.1 ready on card',C.green],['11:12','Twofold connected',C.dim]];
+  n.forEach(([t,m,c],i)=>{const y=150+i*36;circ(150,y,6,c);text(t,190,y,12,C.dim,"'DM Mono', monospace",'left');text(m,250,y,14,C.fg,null,'left');});
+  arc(CX,CY,198,224,0,TAU,C.cell);arc(CX,CY,198,224,0,0.1*TAU,C.amber);text('turn for older',CX,112,11,C.dim2);tabs('PADS');corners('KEY','FOLLOW');text('5 notices · 1 needs you',CX,420,12,C.dim);
+});
+
+const grid=document.getElementById('grid');
+for(const s of screens){
+  const el=document.createElement('div');el.className='screen'+(s.wide?' wide':'');
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;el.appendChild(cv);
+  const cap=document.createElement('div');cap.className='cap';cap.innerHTML=`<b>${s.name}<small>${s.tag}</small></b><p>${s.desc}</p>`;el.appendChild(cap);
+  grid.appendChild(el);ctx=cv.getContext('2d');if(!ctx.roundRect)ctx.roundRect=function(x,y,w,h,r){this.moveTo(x+r,y);this.arcTo(x+w,y,x+w,y+h,r);this.arcTo(x+w,y+h,x,y+h,r);this.arcTo(x,y+h,x,y,r);this.arcTo(x,y,x+w,y,r);this.closePath();};
+  s.fn();
+}
+})();
+</script>

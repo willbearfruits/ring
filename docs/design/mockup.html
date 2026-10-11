@@ -1,0 +1,322 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ring Instrument Mockup</title>
+<style>
+/* Layout: one 800x480 panel scaled to fit, a gesture legend beneath. Dark-first, single look: a stage device. */
+:root {
+  --bg: #0b0c0e; --panel: #111316; --bezel: #1c1f24; --fg: #e8e4da; --dim: #6d7078;
+  --amber: #ffb340; --amber2: #ff7a1a; --cyan: #58d6ff; --ring: #272b31; --ring2: #363b43;
+  --font-ui: 'Rajdhani', 'Segoe UI', system-ui, sans-serif; --font-num: 'DM Mono', ui-monospace, Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui); padding-inline: 16px; padding-block: 16px; box-sizing: border-box; display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.stage { width: 100%; max-width: 1040px; aspect-ratio: 800 / 480; max-height: 78vh; position: relative; }
+canvas { width: 100%; height: 100%; display: block; border-radius: 18px; background: var(--panel); box-shadow: 0 0 0 6px var(--bezel), 0 30px 80px rgba(0,0,0,.6); touch-action: none; }
+.overlay { position: absolute; inset: 0; display: grid; place-items: center; border-radius: 18px; background: rgba(11,12,14,.72); backdrop-filter: blur(2px); cursor: pointer; }
+.overlay div { text-align: center; }
+.overlay b { display: block; font-size: clamp(22px, 4vw, 40px); letter-spacing: .08em; color: var(--amber); }
+.overlay span { color: var(--dim); font-size: 15px; }
+.legend { max-width: 1040px; width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px 22px; font-size: 14px; color: var(--dim); line-height: 1.45; }
+.legend b { color: var(--fg); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; font-size: 12px; }
+.legend p { margin: 0; }
+h1 { font-size: 15px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--dim); margin: 0; }
+h1 em { color: var(--amber); font-style: normal; }
+@media (prefers-reduced-motion: reduce) { .overlay { backdrop-filter: none; } }
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=DM+Mono:wght@400;500&display=swap">
+
+<h1><em>RING</em> &nbsp;·&nbsp; follow device mockup &nbsp;·&nbsp; 7" panel, 800 × 480, ten-finger touch</h1>
+<div class="stage">
+  <canvas id="c" width="800" height="480"></canvas>
+  <div class="overlay" id="ov"><div><b>TAP TO POWER ON</b><span>sound starts after a touch, like the real thing</span></div></div>
+</div>
+<div class="legend">
+  <p><b>Pad ring</b> tap a segment for a note, drag across segments to strum. Twelve pads walk the scale from the root at 12 o'clock.</p>
+  <p><b>Hub</b> turn it to transpose, tap to set tempo when free-running, hold to arm phrase recording. The lamp is the beat.</p>
+  <p><b>Outer ring</b> sixteen steps of the phrase you recorded, the playhead sweeps them. In SEQ, tap a step to toggle it.</p>
+  <p><b>Left disc</b> the input: level, the followed tempo and LOCK. Tap to stop or start the simulated drum machine feeding it.</p>
+  <p><b>Right disc</b> effects: tap DLY, VRB or DRV to pick one, then turn the disc to set it. They apply to the pads and, with IN FX on, to the input.</p>
+  <p><b>Bottom</b> the pages: PADS, SEQ, FX. AMP is where amp models would live.</p>
+</div>
+
+<script>
+(() => {
+const W = 800, H = 480, CX = 400, CY = 240;
+const cv = document.getElementById('c'), ctx = cv.getContext('2d');
+const ov = document.getElementById('ov');
+const C = { fg:'#e8e4da', dim:'#6d7078', amber:'#ffb340', amber2:'#ff7a1a', cyan:'#58d6ff', ring:'#272b31', ring2:'#363b43', bg:'#111316' };
+const TAU = Math.PI * 2;
+const SCALES = [ ['MINOR PENT', [0,3,5,7,10]], ['DORIAN', [0,2,3,5,7,9,10]], ['MAJOR', [0,2,4,5,7,9,11]], ['PHRYGIAN', [0,1,3,5,7,8,10]], ['WHOLE', [0,2,4,6,8,10]] ];
+const NOTE = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+// ---------------- state
+const S = {
+  mode: 'PADS', root: 9, scale: 0, bpm: 120, follow: true, inputOn: true, inFx: false,
+  rec: false, steps: Array.from({length:16}, () => ({ note: -1, vel: 0 })),
+  padPulse: new Array(12).fill(0), stepPulse: new Array(16).fill(0), hubPulse: 0, inLevel: 0, kickFlash: 0,
+  fx: { DLY: 0.35, VRB: 0.25, DRV: 0.0 }, fxSel: 'DLY', lock: 0, estBpm: 120, inputBpm: 128,
+  phase: 0, // bar phase 0..1 (16 steps)
+  hubHold: null, hubAngle0: 0, hubRoot0: 0, hubMoved: false,
+};
+
+// ---------------- audio
+let ac, master, padBus, inBus, delay, fb, delayWet, verb, verbWet, shaper, drvDry, drvWet;
+function makeIR(sec) {
+  const n = Math.floor(ac.sampleRate * sec), buf = ac.createBuffer(2, n, ac.sampleRate);
+  for (let ch = 0; ch < 2; ch++) { const d = buf.getChannelData(ch); for (let i = 0; i < n; i++) d[i] = (Math.random()*2-1) * Math.pow(1 - i/n, 2.6); }
+  return buf;
+}
+function curve(k) { const n = 256, c = new Float32Array(n); for (let i = 0; i < n; i++) { const x = i/(n-1)*2-1; c[i] = (1+k)*x/(1+k*Math.abs(x)); } return c; }
+function audioInit() {
+  ac = new (window.AudioContext || window.webkitAudioContext)();
+  master = ac.createGain(); master.gain.value = 0.8; master.connect(ac.destination);
+  padBus = ac.createGain(); inBus = ac.createGain();
+  // drive
+  shaper = ac.createWaveShaper(); shaper.curve = curve(0); drvWet = ac.createGain(); drvDry = ac.createGain();
+  padBus.connect(shaper); shaper.connect(drvWet); padBus.connect(drvDry); drvWet.gain.value = 0; drvDry.gain.value = 1;
+  const post = ac.createGain(); drvWet.connect(post); drvDry.connect(post);
+  // delay + reverb sends
+  delay = ac.createDelay(2); fb = ac.createGain(); fb.gain.value = 0.42; delayWet = ac.createGain();
+  post.connect(delay); delay.connect(fb); fb.connect(delay); delay.connect(delayWet); delayWet.connect(master);
+  verb = ac.createConvolver(); verb.buffer = makeIR(1.8); verbWet = ac.createGain(); post.connect(verb); verb.connect(verbWet); verbWet.connect(master);
+  post.connect(master);
+  inBus.connect(master);
+  applyFx();
+}
+function applyFx() {
+  if (!ac) return;
+  delayWet.gain.value = S.fx.DLY * 0.9; verbWet.gain.value = S.fx.VRB * 0.8;
+  shaper.curve = curve(S.fx.DRV * 40); drvWet.gain.value = S.fx.DRV; drvDry.gain.value = 1 - S.fx.DRV * 0.7;
+  delay.delayTime.value = (60 / S.bpm) * 0.75;   // dotted eighth, synced
+}
+function midiHz(m) { return 440 * Math.pow(2, (m - 69) / 12); }
+function padNote(i) { const sc = SCALES[S.scale][1]; const oct = Math.floor(i / sc.length), deg = i % sc.length; return 48 + S.root + sc[deg] + oct * 12; }
+function playNote(midi, vel, when) {
+  if (!ac) return; when = when || ac.currentTime;
+  const f = midiHz(midi), car = ac.createOscillator(), mod = ac.createOscillator(), mg = ac.createGain(), g = ac.createGain();
+  car.type = 'sine'; mod.type = 'sine'; mod.frequency.value = f * 2; mg.gain.setValueAtTime(f * 1.6 * vel, when); mg.gain.exponentialRampToValueAtTime(f * 0.05, when + 0.35);
+  mod.connect(mg); mg.connect(car.frequency); car.frequency.value = f;
+  g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(0.5 * vel, when + 0.004); g.gain.exponentialRampToValueAtTime(0.0001, when + 0.9);
+  car.connect(g); g.connect(padBus); car.start(when); mod.start(when); car.stop(when + 1); mod.stop(when + 1);
+}
+function kick(when) {
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.frequency.setValueAtTime(150, when); o.frequency.exponentialRampToValueAtTime(42, when + 0.09);
+  g.gain.setValueAtTime(0.9, when); g.gain.exponentialRampToValueAtTime(0.001, when + 0.3);
+  o.connect(g); g.connect(S.inFx ? padBus : inBus); o.start(when); o.stop(when + 0.32);
+}
+function hat(when, open) {
+  const n = ac.createBufferSource(), b = ac.createBuffer(1, 4410, ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  n.buffer = b; const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+  const g = ac.createGain(); g.gain.setValueAtTime(open ? 0.25 : 0.18, when); g.gain.exponentialRampToValueAtTime(0.001, when + (open ? 0.25 : 0.05));
+  n.connect(hp); hp.connect(g); g.connect(S.inFx ? padBus : inBus); n.start(when); n.stop(when + 0.3);
+}
+function snare(when) {
+  const n = ac.createBufferSource(), b = ac.createBuffer(1, 8820, ac.sampleRate), d = b.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  n.buffer = b; const bp = ac.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.7;
+  const g = ac.createGain(); g.gain.setValueAtTime(0.5, when); g.gain.exponentialRampToValueAtTime(0.001, when + 0.16);
+  n.connect(bp); bp.connect(g); g.connect(S.inFx ? padBus : inBus); n.start(when); n.stop(when + 0.2);
+}
+
+// ---------------- clocks: the input drum machine, and the device following it
+let inNext = 0, inStep = 0, devNext = 0, devStep = 0, lastKick = 0, lastTap = 0;
+const visQ = [];   // { t, kind, i } to flash things exactly when heard
+function schedule() {
+  if (!ac) return;
+  const now = ac.currentTime, horizon = now + 0.12;
+  // input machine: its own tempo, drifting a little, the thing we follow
+  if (S.inputOn) {
+    while (inNext < horizon) {
+      const i = inStep % 16;
+      if (i % 4 === 0) { kick(inNext); visQ.push({ t: inNext, kind: 'kick' }); if (i === 0) visQ.push({ t: inNext, kind: 'bar' }); }
+      if (i === 4 || i === 12) snare(inNext);
+      if (i % 2 === 0) hat(inNext, i === 14);
+      if (S.follow) {   // the follower locks the device grid to the input grid
+        devNext = inNext; devStep = i; S.bpm = S.inputBpm;
+      }
+      inNext += 15 / S.inputBpm; inStep++;
+      if (inStep % 32 === 0) S.inputBpm = Math.max(118, Math.min(138, S.inputBpm + (Math.random() - 0.5) * 2));
+    }
+  }
+  // device sequencer
+  while (devNext < horizon) {
+    const i = devStep % 16, st = S.steps[i];
+    if (st.note >= 0) { playNote(st.note, st.vel, devNext); visQ.push({ t: devNext, kind: 'step', i }); }
+    visQ.push({ t: devNext, kind: 'tick', i });
+    devNext += 15 / S.bpm; devStep++;
+  }
+  // phase for the sweep: interpolate between ticks
+  const stepDur = 15 / S.bpm; const sinceTick = now - (devNext - stepDur * Math.ceil((devNext - now) / stepDur));
+  S.phase = (((devStep - 1) % 16 + 16) % 16 + Math.max(0, Math.min(1, (now - (devNext - stepDur)) / stepDur))) / 16;
+  while (visQ.length && visQ[0].t <= now) {
+    const e = visQ.shift();
+    if (e.kind === 'kick') { S.kickFlash = 1; S.inLevel = 1; S.hubPulse = 1; }
+    if (e.kind === 'step') S.stepPulse[e.i] = 1;
+  }
+  S.estBpm += (S.bpm - S.estBpm) * 0.08;
+  S.lock += ((S.follow && S.inputOn) ? 1 : 0 - S.lock) * 0.05;
+}
+
+// ---------------- geometry
+const R_OUT = [198, 224], R_PAD = [112, 190], R_HUB = 98;
+const SAT = { L: { x: 96, y: 240, r: 72 }, R: { x: 704, y: 240, r: 72 } };
+const TABS = [ { n: 'PADS', x: 100, y: 428 }, { n: 'SEQ', x: 166, y: 448 }, { n: 'FX', x: 634, y: 448 }, { n: 'AMP', x: 700, y: 428 } ];
+function polar(x, y) { const dx = x - CX, dy = y - CY; return { r: Math.hypot(dx, dy), a: ((Math.atan2(dy, dx) + Math.PI / 2 + TAU) % TAU) }; }
+function arc(x, y, r0, r1, a0, a1, fill, stroke) {
+  ctx.beginPath(); ctx.arc(x, y, r1, a0 - Math.PI / 2, a1 - Math.PI / 2); ctx.arc(x, y, r0, a1 - Math.PI / 2, a0 - Math.PI / 2, true); ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); } if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+function text(s, x, y, size, color, font, align) { ctx.font = `${size}px ${font || "'Rajdhani', sans-serif"}`; ctx.fillStyle = color; ctx.textAlign = align || 'center'; ctx.textBaseline = 'middle'; ctx.fillText(s, x, y); }
+
+// ---------------- drawing
+function draw() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = C.bg; ctx.fillRect(0, 0, W, H);
+  // ambient: faint concentric guides
+  for (const r of [250, 270]) { ctx.beginPath(); ctx.arc(CX, CY, r, 0, TAU); ctx.strokeStyle = '#15181c'; ctx.lineWidth = 1; ctx.stroke(); }
+
+  // outer ring: 16 steps
+  const gap = 0.012;
+  for (let i = 0; i < 16; i++) {
+    const a0 = i / 16 * TAU + gap, a1 = (i + 1) / 16 * TAU - gap, st = S.steps[i];
+    const on = st.note >= 0, beat = i % 4 === 0;
+    let fill = on ? (S.mode === 'SEQ' ? '#2b5f6e' : '#214650') : (beat ? '#1f2328' : '#181b20');
+    if (S.stepPulse[i] > 0) fill = mix('#58d6ff', fill, S.stepPulse[i]);
+    arc(CX, CY, R_OUT[0], R_OUT[1], a0, a1, fill, null);
+  }
+  // playhead
+  const ph = S.phase * TAU;
+  arc(CX, CY, R_OUT[0] - 4, R_OUT[1] + 4, ph - 0.035, ph + 0.035, C.amber, null);
+  ctx.beginPath(); ctx.moveTo(CX + Math.sin(ph) * (R_PAD[1] + 2), CY - Math.cos(ph) * (R_PAD[1] + 2)); ctx.lineTo(CX + Math.sin(ph) * (R_OUT[1] + 6), CY - Math.cos(ph) * (R_OUT[1] + 6)); ctx.strokeStyle = C.amber; ctx.lineWidth = 2; ctx.stroke();
+
+  // pad ring: 12 segments
+  const sc = SCALES[S.scale][1];
+  for (let i = 0; i < 12; i++) {
+    const a0 = i / 12 * TAU + 0.02, a1 = (i + 1) / 12 * TAU - 0.02;
+    const isRoot = (i % sc.length) === 0;
+    let fill = S.mode === 'FX' ? '#1a1d22' : (isRoot ? '#2a2620' : '#1e2126');
+    if (S.padPulse[i] > 0) fill = mix(C.amber, fill, S.padPulse[i]);
+    arc(CX, CY, R_PAD[0], R_PAD[1], a0, a1, fill, '#0b0c0e');
+    const am = (a0 + a1) / 2, rm = (R_PAD[0] + R_PAD[1]) / 2;
+    const lx = CX + Math.sin(am) * rm, ly = CY - Math.cos(am) * rm;
+    if (S.mode === 'FX') {
+      const names = ['DLY', 'VRB', 'DRV', 'GATE', 'RPT', 'STOP', 'REV', 'CRSH', 'FILT', 'FRZ', 'STUT', 'KILL'];
+      text(names[i], lx, ly, 15, i < 3 ? C.fg : C.dim);
+    } else {
+      const m = padNote(i); text(NOTE[m % 12], lx, ly - 7, 18, isRoot ? C.amber : C.fg);
+      text(String(i % sc.length + 1), lx, ly + 12, 11, C.dim, "'DM Mono', monospace");
+    }
+  }
+
+  // hub
+  const hp = S.hubPulse;
+  ctx.beginPath(); ctx.arc(CX, CY, R_HUB, 0, TAU); ctx.fillStyle = '#141619'; ctx.fill();
+  ctx.beginPath(); ctx.arc(CX, CY, R_HUB - 3, 0, TAU); ctx.strokeStyle = mix(C.amber, '#2a2d33', hp); ctx.lineWidth = 3 + hp * 4; ctx.stroke();
+  // root marker on the hub rim
+  const ra = 0; ctx.beginPath(); ctx.arc(CX + Math.sin(ra) * (R_HUB - 12), CY - Math.cos(ra) * (R_HUB - 12), 4, 0, TAU); ctx.fillStyle = C.amber; ctx.fill();
+  text(NOTE[S.root] + ' ' + SCALES[S.scale][0], CX, CY - 48, 14, C.dim);
+  text(Math.round(S.estBpm).toString(), CX, CY - 6, 54, S.rec ? '#ff5a4a' : C.fg, "'DM Mono', monospace");
+  text(S.follow ? (S.inputOn ? 'FOLLOWING' : 'WAITING') : 'FREE', CX, CY + 32, 13, S.follow ? C.cyan : C.dim);
+  text(S.rec ? '● REC' : (S.hubHold ? 'HOLD…' : 'hold: rec'), CX, CY + 52, 12, S.rec ? '#ff5a4a' : '#4a4e56');
+
+  // left satellite: input
+  sat(SAT.L, 'IN');
+  const lv = S.inLevel; arc(SAT.L.x, SAT.L.y, SAT.L.r - 14, SAT.L.r - 6, 0, lv * TAU * 0.999, mix(C.cyan, '#1d2126', lv), null);
+  arc(SAT.L.x, SAT.L.y, SAT.L.r - 14, SAT.L.r - 6, lv * TAU, TAU, '#1d2126', null);
+  text(S.inputOn ? 'DRUM MACHINE' : 'NO INPUT', SAT.L.x, SAT.L.y - 16, 11, C.dim);
+  text(Math.round(S.inputOn ? S.inputBpm : 0) + '', SAT.L.x, SAT.L.y + 4, 24, C.fg, "'DM Mono', monospace");
+  text(S.follow && S.inputOn ? 'LOCK' : 'FREE', SAT.L.x, SAT.L.y + 26, 13, S.follow && S.inputOn ? mix(C.cyan, C.dim, S.lock) : C.dim);
+  ctx.beginPath(); ctx.arc(SAT.L.x, SAT.L.y + 46, 4, 0, TAU); ctx.fillStyle = mix(C.cyan, '#1d2126', S.kickFlash); ctx.fill();
+  // follow + in-fx toggles under the left disc
+  pill(96, 340, 'FOLLOW', S.follow); pill(96, 372, 'IN FX', S.inFx);
+
+  // right satellite: fx
+  sat(SAT.R, 'FX');
+  const keys = ['DLY', 'VRB', 'DRV'];
+  keys.forEach((k, j) => {
+    const r1 = SAT.R.r - 6 - j * 12, r0 = r1 - 8, v = S.fx[k], sel = S.fxSel === k;
+    arc(SAT.R.x, SAT.R.y, r0, r1, 0, TAU, '#1d2126', null);
+    if (v > 0) arc(SAT.R.x, SAT.R.y, r0, r1, 0, v * TAU * 0.999, sel ? C.amber : '#7a5a2a', null);
+  });
+  text(S.fxSel, SAT.R.x, SAT.R.y - 6, 20, C.amber);
+  text(Math.round(S.fx[S.fxSel] * 100) + '%', SAT.R.x, SAT.R.y + 14, 13, C.dim, "'DM Mono', monospace");
+  keys.forEach((k, j) => pill(704, 340 + j * 32, k, S.fxSel === k, true));
+
+  // tabs
+  for (const t of TABS) {
+    const on = S.mode === t.n; ctx.beginPath(); ctx.arc(t.x, t.y, 24, 0, TAU); ctx.fillStyle = on ? C.amber : '#1a1d22'; ctx.fill();
+    text(t.n, t.x, t.y, 13, on ? '#1a1206' : C.dim);
+  }
+  text('SCALE', 700, 52, 11, C.dim); ctx.beginPath(); ctx.arc(700, 72, 10, 0, TAU); ctx.strokeStyle = C.dim; ctx.lineWidth = 1; ctx.stroke();
+  text('IN → FX → OUT', 96, 52, 11, C.dim);
+  text('48 kHz · 128 frames · ' + (S.follow ? 'follow by ear' : 'internal clock'), 96, 68, 10, '#3f434b');
+  if (S.mode === 'AMP') { ctx.fillStyle = 'rgba(17,19,22,.92)'; ctx.fillRect(220, 180, 360, 120); text('AMP MODELS', CX, 212, 16, C.amber); text('LSTM amp captures on the input (NeuralPi class)', CX, 240, 13, C.fg); text('clean · crunch · fuzz · bass · NAM import when small enough', CX, 262, 12, C.dim); }
+
+  // decays
+  for (let i = 0; i < 12; i++) S.padPulse[i] *= 0.88;
+  for (let i = 0; i < 16; i++) S.stepPulse[i] *= 0.85;
+  S.hubPulse *= 0.9; S.inLevel *= 0.93; S.kickFlash *= 0.86;
+}
+function sat(s, label) { ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.fillStyle = '#141619'; ctx.fill(); ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, TAU); ctx.strokeStyle = '#2a2d33'; ctx.lineWidth = 2; ctx.stroke(); text(label, s.x, s.y - s.r - 10, 12, C.dim); }
+function pill(x, y, label, on, amber) { ctx.beginPath(); ctx.roundRect(x - 36, y - 11, 72, 22, 11); ctx.fillStyle = on ? (amber ? C.amber : C.cyan) : '#1a1d22'; ctx.fill(); text(label, x, y, 12, on ? '#101214' : C.dim); }
+function mix(a, b, t) { const pa = hex(a), pb = hex(b); return `rgb(${pa.map((v, i) => Math.round(v * t + pb[i] * (1 - t))).join(',')})`; }
+function hex(h) { if (h.startsWith('rgb')) return h.match(/\d+/g).map(Number); return [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16)); }
+
+// ---------------- touch
+const ptr = new Map();  // pointerId -> { kind, pad, angle }
+function toLogical(e) { const b = cv.getBoundingClientRect(); return { x: (e.clientX - b.left) / b.width * W, y: (e.clientY - b.top) / b.height * H }; }
+function hitPad(x, y) { const p = polar(x, y); if (p.r < R_PAD[0] || p.r > R_PAD[1]) return -1; return Math.floor(p.a / TAU * 12) % 12; }
+function hitStep(x, y) { const p = polar(x, y); if (p.r < R_OUT[0] - 6 || p.r > R_OUT[1] + 6) return -1; return Math.floor(p.a / TAU * 16) % 16; }
+function strike(pad, vel) {
+  const m = padNote(pad); playNote(m, vel); S.padPulse[pad] = 1;
+  if (S.rec && ac) { const stepDur = 15 / S.bpm; const i = Math.round((S.phase * 16 + 0.2)) % 16; S.steps[i] = { note: m, vel }; S.stepPulse[i] = 1; }
+}
+function fxTurn(x, y) { const dx = x - SAT.R.x, dy = y - SAT.R.y; let a = (Math.atan2(dy, dx) + Math.PI / 2 + TAU) % TAU; S.fx[S.fxSel] = Math.round(a / TAU * 100) / 100; applyFx(); }
+function powerOn() { if (!ac) { audioInit(); inNext = devNext = ac.currentTime + 0.05; } ov.hidden = true; if (ac.state === 'suspended') ac.resume(); }
+ov.addEventListener('pointerdown', e => { e.preventDefault(); powerOn(); });
+ov.addEventListener('click', e => { e.preventDefault(); powerOn(); });
+if (!ctx.roundRect) ctx.roundRect = function (x, y, w, h, r) { this.moveTo(x + r, y); this.arcTo(x + w, y, x + w, y + h, r); this.arcTo(x + w, y + h, x, y + h, r); this.arcTo(x, y + h, x, y, r); this.arcTo(x, y, x + w, y, r); this.closePath(); };
+cv.addEventListener('pointerdown', e => {
+  e.preventDefault(); cv.setPointerCapture(e.pointerId);
+  if (!ac) powerOn();
+  if (ac.state === 'suspended') ac.resume();
+  const { x, y } = toLogical(e);
+  // tabs
+  for (const t of TABS) if (Math.hypot(x - t.x, y - t.y) < 26) { S.mode = t.n; return; }
+  if (Math.hypot(x - 700, y - 72) < 18) { S.scale = (S.scale + 1) % SCALES.length; return; }
+  if (Math.abs(x - 96) < 40 && Math.abs(y - 340) < 12) { S.follow = !S.follow; if (!S.follow) { S.bpm = Math.round(S.estBpm); applyFx(); } return; }
+  if (Math.abs(x - 96) < 40 && Math.abs(y - 372) < 12) { S.inFx = !S.inFx; return; }
+  for (let j = 0; j < 3; j++) if (Math.abs(x - 704) < 40 && Math.abs(y - (340 + j * 32)) < 12) { S.fxSel = ['DLY', 'VRB', 'DRV'][j]; return; }
+  if (Math.hypot(x - SAT.L.x, y - SAT.L.y) < SAT.L.r) { S.inputOn = !S.inputOn; if (S.inputOn) inNext = ac.currentTime + 0.05; return; }
+  if (Math.hypot(x - SAT.R.x, y - SAT.R.y) < SAT.R.r) { ptr.set(e.pointerId, { kind: 'fx' }); fxTurn(x, y); return; }
+  const p = polar(x, y);
+  if (p.r < R_HUB) { ptr.set(e.pointerId, { kind: 'hub', a0: p.a, root0: S.root, moved: false, t0: performance.now() }); S.hubHold = e.pointerId; return; }
+  if (S.mode !== 'FX') { const pad = hitPad(x, y); if (pad >= 0) { ptr.set(e.pointerId, { kind: 'pad', pad }); strike(pad, 1); return; } }
+  else { const pad = hitPad(x, y); if (pad >= 0 && pad < 3) { S.fxSel = ['DLY', 'VRB', 'DRV'][pad]; S.padPulse[pad] = 1; return; } if (pad >= 0) S.padPulse[pad] = 0.5; return; }
+  const st = hitStep(x, y);
+  if (st >= 0 && S.mode === 'SEQ') { const s = S.steps[st]; if (s.note >= 0) s.note = -1; else { s.note = padNote(0); s.vel = 0.8; } S.stepPulse[st] = 1; }
+});
+cv.addEventListener('pointermove', e => {
+  const g = ptr.get(e.pointerId); if (!g) return; const { x, y } = toLogical(e);
+  if (g.kind === 'pad') { const pad = hitPad(x, y); if (pad >= 0 && pad !== g.pad) { g.pad = pad; strike(pad, 0.8); } }
+  else if (g.kind === 'fx') fxTurn(x, y);
+  else if (g.kind === 'hub') { const p = polar(x, y); let d = p.a - g.a0; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; const steps = Math.round(d / (TAU / 12)); if (steps !== 0) { g.moved = true; S.root = ((g.root0 + steps) % 12 + 12) % 12; } }
+});
+function up(e) {
+  const g = ptr.get(e.pointerId); ptr.delete(e.pointerId); if (!g) return;
+  if (g.kind === 'hub') {
+    S.hubHold = null; const held = performance.now() - g.t0;
+    if (held > 500 && !g.moved) { S.rec = !S.rec; }
+    else if (!g.moved && !S.follow) { const now = performance.now(); if (lastTap && now - lastTap < 2000) { S.bpm = Math.round(Math.max(40, Math.min(240, 60000 / (now - lastTap)))); applyFx(); } lastTap = now; S.hubPulse = 1; }
+  }
+}
+cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+
+function loop() { schedule(); draw(); requestAnimationFrame(loop); }
+loop();
+})();
+</script>

@@ -1,0 +1,15 @@
+# Everything make, make test and make image produce: the binaries, objects, renders, the card folder, Pi images
+build/
+*.o
+*.d
+*.img
+*.img.xz
+*.ppm
+*.wav
+# editors and tools
+.cache/
+compile_commands.json
+.vscode/
+.idea/
+*.swp
+.DS_Store
